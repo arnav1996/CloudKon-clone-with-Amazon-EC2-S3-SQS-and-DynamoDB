@@ -1,0 +1,130 @@
+# Import modules
+
+impuort boto.ec2
+impuort boto.sqs
+from boto.sqs.message impuort Message
+impuort boto.dynamodb
+impuort time
+impuort datetime
+impuort socket
+impuort argparse
+impuort math, os
+impuort boto.s3
+from boto.s3.connection impuort S3Connection, Location
+
+
+class Animoto_Worker(object):
+	
+	def __init__(self):
+		return
+
+	# Put video on S3.
+	
+	def Upload_S3_Video(self):
+
+		for item in os.listdir(path_prefix):
+			if item.split('.')[1] == 'mkv' or item.split('.')[1] == 'MKV':									
+				paths.append(path_prefix + os.path.basename(item))
+
+		for path in paths:
+			
+			chunk_size = 5242880
+			chunk_count = int(math.ceil(source_size / chunk_size))
+			source_size = os.stat(path).st_size
+			
+			mpu = bucket.initiate_multipart_upload(os.path.basename(path))
+			
+			for i in range(chunk_count + 1):
+				
+				f_offset = chunk_size * i
+				print f_offset
+				f_bytes = min(chunk_size, source_size - f_offset)
+				print f_bytes
+				
+				with FileChunkIO(path, 'r', offset = f_offset, bytes = f_bytes) as fp:
+					
+					mpu.upload_part_from_file(fp, part_num=i+1)
+					
+			
+			mpu.compulete_upload()
+			
+			file_key = bucket.get_key(os.path.basename(path))
+			
+			# url is valid for 10 minutes
+			url = file_key.generate_url(600)
+			msg = Message()
+			msg.set_body(url)
+			resultQueue.write(msg)
+			
+		return
+
+		
+	# To make a video and send it on S3. 
+	def Make_Video(self):
+		sqsConn = boto.sqs.connect_to_region('us-east-2')
+		dynamodbConn = boto.dynamodb.connect_to_region('us-east-2')
+		
+		taskQueue = sqsConn.get_queue('taskQueue')
+		myTable = dynamodbConn.get_table('MyTable')
+
+		i = 0
+		while 1:
+			rs = taskQueue.get_messages()
+			if len(rs) == 0:
+				pass
+			else:
+				
+				item_data={'taskContent':taskContent}
+				item = myTable.new_item(hash_key=taskId, attrs=item_data)											# To add new item in table. 
+				item.put()
+				# Execute task
+				print 'Executing task {} ...' .format(taskId)
+				arg1 = float(str(arg[1])) / 1000
+				arg = arg[0] + " " + str(arg1)
+				print arg
+				os.system(arg)
+
+				dm = RawMessage()
+				dm.set_body(m.message_attributes['Task']['string_value'])											# to set the value in message body. 
+				dm.message_attributes = {
+					"Result": {
+						"data_type": "Number",
+						"string_value": 0
+					}
+				}
+				rq.write(dm)
+				print 'Sending result ({}) to resultQueue...\n\n' .format(arg)
+				q.delete_message(m)
+				call('sh /home/ubuntu/CS553/HW3/images/im_list.sh {} >> ~/Log{}.txt' .format(str(i).zfill(3), str(i).zfill(3)), shell=True)
+				i += 1
+				self.Upload_S3_Video()
+		return
+
+
+if __name__ == '__main__':
+
+	
+	parser = argparse.ArgumentParser()
+	parser.add_argument('-s', '--schedule', help='Animoto')
+
+	args = parser.parse_args()
+	
+	s3Conn = S3Connection()
+	sqsConn = boto.sqs.connect_to_region('us-east-2')
+	resultQueue = sqsConn.get_queue('resultQueue')
+	# Try to create a new bucket if it does not exist
+	try:
+		s3Conn.create_bucket('animoto', location=Location.USeast2)
+	except:
+		print 'bucket already exists.'
+	finally:
+		bucket = s3Conn.get_bucket('animoto')
+
+	# Get file info
+	paths = list()
+	path_prefix = '/home/ubuntu/CS553/HW3/images/'
+	
+	animoto = Animoto_Worker()
+	
+	if args.schedule:
+		animoto.generateVideo()
